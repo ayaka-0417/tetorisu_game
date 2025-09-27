@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<title>テトリス</title>
+<style>
+canvas { background:#000; display:block; margin:20px auto; }
+.controls { text-align:center; margin-top:10px; }
+button {
+  width: 80px;   /* 横幅を広く */
+  height: 60px;  /* 高さを大きく */
+  margin: 8px;   /* ボタン同士の間隔を少し広げる */
+  font-size: 20px;  /* 文字も大きく */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+#score { text-align:center; font-size:20px; }
+#nextCanvas { background:#111; display:block; margin:0 auto; }
+</style>
+</head>
+<body>
+
+<div id="score">スコア: 0  レベル: 1</div>
+<canvas id="game" width="200" height="400"></canvas>
+<canvas id="nextCanvas" width="80" height="80"></canvas>
+<div class="controls">
+  <button id="left">← 左</button>
+  <button id="right">→ 右</button>
+  <button id="down">↓ 下</button>
+  <button id="rotate">⟳ 回転</button>
+</div>
+
+<script>
+const canvas = document.getElementById("game");
+const ctx = canvas.getContext("2d");
+const nextCanvas = document.getElementById("nextCanvas");
+const nextCtx = nextCanvas.getContext("2d");
+
+const ROWS = 20, COLS = 10, BLOCK = 20;
+let board = Array.from({length: ROWS}, () => Array(COLS).fill(0));
+
+const TETROMINOES = {
+  I: [[[1,1,1,1]], [[1],[1],[1],[1]]],
+  O: [[[1,1],[1,1]]],
+  T: [[[0,1,0],[1,1,1]], [[1,0],[1,1],[1,0]], [[1,1,1],[0,1,0]], [[0,1],[1,1],[0,1]]],
+  S: [[[0,1,1],[1,1,0]], [[1,0],[1,1],[0,1]]],
+  Z: [[[1,1,0],[0,1,1]], [[0,1],[1,1],[1,0]]],
+  J: [[[1,0,0],[1,1,1]], [[1,1],[1,0],[1,0]], [[1,1,1],[0,0,1]], [[0,1],[0,1],[1,1]]],
+  L: [[[0,0,1],[1,1,1]], [[1,0],[1,0],[1,1]], [[1,1,1],[1,0,0]], [[1,1],[0,1],[0,1]]],
+};
+const COLORS = { I:"cyan", O:"yellow", T:"purple", S:"green", Z:"red", J:"blue", L:"orange" };
+
+let piece = randomPiece();
+let nextPiece = randomPiece();
+let score = 0, level = 1, dropInterval = 500;
+
+// 背景マス目
+function drawGrid() {
+  ctx.strokeStyle = "#555"; ctx.lineWidth = 1;
+  for(let r=0; r<=ROWS; r++){ ctx.beginPath(); ctx.moveTo(0,r*BLOCK); ctx.lineTo(COLS*BLOCK,r*BLOCK); ctx.stroke(); }
+  for(let c=0; c<=COLS; c++){ ctx.beginPath(); ctx.moveTo(c*BLOCK,0); ctx.lineTo(c*BLOCK,ROWS*BLOCK); ctx.stroke(); }
+}
+
+function drawBoard(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+  drawGrid();
+  for(let r=0;r<ROWS;r++){
+    for(let c=0;c<COLS;c++){
+      if(board[r][c]){
+        ctx.fillStyle = board[r][c];
+        ctx.fillRect(c*BLOCK,r*BLOCK,BLOCK,BLOCK);
+        ctx.strokeStyle="#000";
+        ctx.strokeRect(c*BLOCK,r*BLOCK,BLOCK,BLOCK);
+      }
+    }
+  }
+}
+
+function drawPiece(){
+  piece.shape.forEach((row,dy)=>row.forEach((val,dx)=>{
+    if(val){ ctx.fillStyle = COLORS[piece.type]; ctx.fillRect((piece.x+dx)*BLOCK,(piece.y+dy)*BLOCK,BLOCK,BLOCK);
+      ctx.strokeStyle="#000"; ctx.strokeRect((piece.x+dx)*BLOCK,(piece.y+dy)*BLOCK,BLOCK,BLOCK); }
+  }));
+}
+
+function drawNext(){
+  nextCtx.clearRect(0,0,nextCanvas.width,nextCanvas.height);
+  const size = nextPiece.shape.length;
+  const offset = Math.floor((4-size)/2)*BLOCK;
+  nextPiece.shape.forEach((row,y)=>row.forEach((val,x)=>{
+    if(val){ nextCtx.fillStyle = COLORS[nextPiece.type]; nextCtx.fillRect(x*BLOCK + offset,y*BLOCK + offset,BLOCK,BLOCK);
+      nextCtx.strokeStyle="#000"; nextCtx.strokeRect(x*BLOCK + offset,y*BLOCK + offset,BLOCK,BLOCK); }
+  }));
+}
+
+function collides(newX,newY,newShape){
+  for(let y=0;y<newShape.length;y++){
+    for(let x=0;x<newShape[y].length;x++){
+      if(newShape[y][x]){
+        let row=newY+y, col=newX+x;
+        if(col<0||col>=COLS||row>=ROWS) return true;
+        if(row>=0 && board[row][col]) return true;
+      }
+    }
+  }
+  return false;
+}
+
+function moveDown(){
+  if(!collides(piece.x,piece.y+1,piece.shape)) piece.y++;
+  else { mergePiece(); let lines=clearLines(); if(lines>0) updateScore(lines); piece=nextPiece; nextPiece=randomPiece();
+    if(collides(piece.x,piece.y,piece.shape)){ alert("ゲームオーバー\nスコア:"+score);
+      board=Array.from({length:ROWS},()=>Array(COLS).fill(0)); score=0; level=1; dropInterval=500;
+      clearInterval(autoDrop); autoDrop=setInterval(moveDown, dropInterval); updateScoreDisplay(); }
+    drawNext();
+  }
+}
+
+function moveLeft(){ if(!collides(piece.x-1,piece.y,piece.shape)) piece.x--; }
+function moveRight(){ if(!collides(piece.x+1,piece.y,piece.shape)) piece.x++; }
+
+function rotatePiece(){
+  const shapes=TETROMINOES[piece.type];
+  const nextRotation=(piece.rotation+1)%shapes.length;
+  const newShape=shapes[nextRotation];
+  if(!collides(piece.x,piece.y,newShape)){ piece.shape=newShape; piece.rotation=nextRotation; }
+}
+
+function mergePiece(){
+  piece.shape.forEach((row,dy)=>row.forEach((val,dx)=>{ if(val && piece.y+dy>=0) board[piece.y+dy][piece.x+dx]=COLORS[piece.type]; }));
+}
+
+function clearLines(){
+  let linesCleared=0;
+  for(let r=ROWS-1;r>=0;r--){
+    if(board[r].every(cell=>cell!==0)){ board.splice(r,1); board.unshift(Array(COLS).fill(0)); linesCleared++; r++; }
+  }
+  return linesCleared;
+}
+
+function updateScore(lines){
+  const lineScore=[0,100,300,500,800]; score+=lineScore[lines];
+  if(score>=level*500){ level++; dropInterval=Math.max(100,dropInterval-50); clearInterval(autoDrop); autoDrop=setInterval(moveDown,dropInterval); }
+  updateScoreDisplay();
+}
+function updateScoreDisplay(){ document.getElementById("score").textContent=`スコア: ${score}  レベル: ${level}`; }
+function randomPiece(){ const keys=Object.keys(TETROMINOES); const type=keys[Math.floor(Math.random()*keys.length)]; return {type,shape:TETROMINOES[type][0],rotation:0,x:4,y:0}; }
+
+document.addEventListener("keydown",e=>{ if(e.key==="ArrowLeft") moveLeft(); else if(e.key==="ArrowRight") moveRight(); else if(e.key==="ArrowDown") moveDown(); else if(e.key==="ArrowUp") rotatePiece(); });
+
+// 左ボタン（長押し対応）
+const btnLeft=document.getElementById("left");
+let leftInterval;
+btnLeft.addEventListener("mousedown",()=>{ moveLeft(); leftInterval=setInterval(moveLeft,150); });
+btnLeft.addEventListener("touchstart",(e)=>{ e.preventDefault(); moveLeft(); leftInterval=setInterval(moveLeft,150); });
+btnLeft.addEventListener("mouseup",()=>clearInterval(leftInterval));
+btnLeft.addEventListener("mouseleave",()=>clearInterval(leftInterval));
+btnLeft.addEventListener("touchend",()=>clearInterval(leftInterval));
+
+// 右ボタン（長押し対応）
+const btnRight=document.getElementById("right");
+let rightInterval;
+btnRight.addEventListener("mousedown",()=>{ moveRight(); rightInterval=setInterval(moveRight,150); });
+btnRight.addEventListener("touchstart",(e)=>{ e.preventDefault(); moveRight(); rightInterval=setInterval(moveRight,150); });
+btnRight.addEventListener("mouseup",()=>clearInterval(rightInterval));
+btnRight.addEventListener("mouseleave",()=>clearInterval(rightInterval));
+btnRight.addEventListener("touchend",()=>clearInterval(rightInterval));
+
+// 下ボタン（長押し）
+const btnDown=document.getElementById("down");
+let dropIntervalId;
+btnDown.addEventListener("mousedown",startDrop);
+btnDown.addEventListener("touchstart",startDrop);
+btnDown.addEventListener("mouseup",stopDrop);
+btnDown.addEventListener("mouseleave",stopDrop);
+btnDown.addEventListener("touchend",stopDrop);
+function startDrop(){ moveDown(); dropIntervalId=setInterval(moveDown,100); }
+function stopDrop(){ clearInterval(dropIntervalId); }
+
+// 回転ボタン（二重押し防止）
+const rotateBtn=document.getElementById("rotate");
+rotateBtn.addEventListener("touchstart",e=>{ e.preventDefault(); rotatePiece(); });
+rotateBtn.addEventListener("click",rotatePiece);
+
+function gameLoop(){ drawBoard(); drawPiece(); drawNext(); requestAnimationFrame(gameLoop); }
+gameLoop();
+
+let autoDrop=setInterval(moveDown,dropInterval);
+</script>
+</body>
+</html>
